@@ -437,3 +437,52 @@ tar -czf doris-backup-$(date +%Y%m%d).tar.gz ~/doris-docker/
 # 恢复（在宿主机执行）
 tar -xzf doris-backup-20240101.tar.gz -C ~/
 ```
+
+## QA
+### ERROR: The JAVA version is 8, it must be JDK-17.
+
+```bash
+sh-4.2$ pwd
+/home/ocsuser/doris-src
+sh-4.2$ sh build.sh --fe --clean
+Target system: Linux; Target arch: x86_64
+Python 2.7.5
+Check JAVA_HOME version
+JAVA_HOME=/usr/lib/jvm/java-1.8.0. It does not point to JDK-17.
+The 'JDK_17' environment variable is not set.
+ERROR: The JAVA version is 8, it must be JDK-17.
+```
+现在请在容器中执行以下命令：
+```bash
+# 1. 切换到 root 用户
+sudo su -
+
+# 2. 下载 OpenJDK 17（使用华为云镜像，国内速度快）
+cd /tmp
+wget https://mirrors.huaweicloud.com/openjdk/17.0.2/openjdk-17.0.2_linux-x64_bin.tar.gz
+
+# 3. 解压到 /usr/local
+tar -xzf openjdk-17.0.2_linux-x64_bin.tar.gz -C /usr/local/
+ln -s /usr/local/jdk-17.0.2 /usr/local/jdk-17
+
+# 4. 清理
+rm -f openjdk-17.0.2_linux-x64_bin.tar.gz
+
+# 5. 退出 root
+exit
+
+# 6. 配置环境变量
+echo 'export JAVA_HOME=/usr/local/jdk-17' >> ~/.zshrc
+echo 'export PATH=$JAVA_HOME/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+
+# 7. 验证安装
+java -version
+echo $JAVA_HOME
+
+# 8. 开始编译
+cd ~/doris-src
+sh build.sh --fe --clean
+sh build.sh --be --clean
+
+```
