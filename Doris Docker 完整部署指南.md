@@ -1,44 +1,152 @@
 # Doris Docker 完整部署指南
 
-## 一、准备工作
+## 一、创建 Dockerfile
 
-### 1.1 创建宿主机目录结构
+### 1.1 先克隆 Doris 源码到本地
+
+**重要：必须先下载源码，因为 Dockerfile 需要使用源码中的构建环境**
 
 ```bash
-# 创建 Doris 相关目录
-mkdir -p ~/doris-docker/doris-src      # Doris 源码目录
+# 创建目录
+mkdir -p ~/doris-docker/doris-src
+cd ~/doris-docker/doris-src
+
+# 克隆 Doris 源码
+git clone https://github.com/apache/doris.git
+# 或使用国内镜像（如果 GitHub 较慢）
+# git clone https://gitee.com/mirrors/doris.git
+
+# 等待克隆完成后，进入源码目录
+cd doris
+```
+
+### 1.2 创建 Dockerfile 文件
+
+在 Doris 源码的 docker 目录中已经有构建环境的 Dockerfile，我们需要在外部创建一个自定义的 Dockerfile：
+
+```bash
+# 创建构建目录
+mkdir -p ~/doris-docker-build
+cd ~/doris-docker-build
+vim Dockerfile
+```
+
+将以下内容复制到 Dockerfile 中（使用本地源码中的 Dockerfile 作为基础）：
+
+**方式：直接使用 Doris 官方构建镜像并自定义（更简单）**
+参看 官网 ： [Doris Docker 快速搭建开发环境](https://doris.apache.org/zh-CN/community/developer-guide/docker-dev)
+
+```dockerfile
+FROM apache/doris:build-env-ldb-toolchain-latest
+
+USER root
+WORKDIR /root
+
+# 设置 root 密码
+RUN echo '123456' | passwd root --stdin
+
+# 安装额外工具
+RUN yum install -y vim net-tools man wget git mysql lsof bash-completion zsh sudo \
+    && yum clean all
+
+# 创建用户 ocsuser
+RUN useradd -ms /bin/bash ocsuser \
+    && echo '0)y^B5vD' | passwd ocsuser --stdin \
+    && usermod -a -G wheel ocsuser \
+    && echo 'ocsuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# 切换到普通用户
+USER ocsuser
+WORKDIR /home/ocsuser
+
+# 配置 Git
+RUN git config --global color.ui true \
+    && git config --global user.email "piepis@163.com" \
+    && git config --global user.name "piepis"
+
+# 配置 Maven（使用国内镜像加速）
+
+
+# 安装并配置 zsh
+USER root
+RUN chsh -s /bin/zsh ocsuser
+
+USER ocsuser
+RUN wget https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -O - | zsh || true \
+    && git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions || true \
+    && git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting || true \
+    && sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc || true
+
+WORKDIR /home/ocsuser
+
+CMD ["/bin/zsh"]
+```
+
+**推荐使用方式**，因为 Doris 官方的构建镜像已经包含了所有编译所需的依赖。
+
+保存并退出（`:wq`）
+
+## 二、准备工作
+
+### 2.1 创建其他宿主机目录结构
+
+源码目录已经在第一步创建了，现在创建其他需要的目录：
+
+```bash
+# 创建 Maven 缓存和数据目录（源码目录已经在第一步创建）
 mkdir -p ~/doris-docker/.m2            # Maven 依赖缓存
 mkdir -p ~/doris-docker/fe-data        # FE 数据目录
 mkdir -p ~/doris-docker/be-data        # BE 数据目录
 mkdir -p ~/doris-docker/logs           # 日志目录
 ```
 
-### 1.2 克隆 Doris 源码（如果还没有）
+### 2.2 验证源码是否下载完成
 
 ```bash
-cd ~/doris-docker/doris-src
-git clone https://github.com/apache/doris.git
-# 或使用国内镜像
-# git clone https://gitee.com/mirrors/doris.git
+# 检查源码目录
+ls -la ~/doris-docker/doris-src/doris/
+# 应该能看到 fe、be、docker 等目录
+
+# 查看 Doris 版本
+cd ~/doris-docker/doris-src/doris
+git branch
 ```
 
-## 二、构建镜像
+## 三、构建镜像
 
 ```bash
 # 在 Dockerfile 所在目录执行
+cd ~/doris-docker-build
 docker build -t doris-dev:latest .
 ```
 
-## 三、运行容器（推荐方式）
+**注意事项：**
+- 首次构建可能需要较长时间（下载基础镜像和安装依赖）
+- **推荐使用方式的 Dockerfile**（基于官方构建镜像），因为已包含所有编译依赖
+- 如果 GitHub 访问较慢，可以配置 Docker 代理或使用国内镜像源
+- 构建完成后可以使用 `docker images` 查看镜像
 
-### 3.1 首次启动容器
+**如果构建失败，可以尝试：**
+```bash
+# 使用代理构建（如果有代理）
+docker build --build-arg HTTP_PROXY=http://your-proxy:port \
+             --build-arg HTTPS_PROXY=http://your-proxy:port \
+             -t doris-dev:latest .
+
+# 或者跳过 oh-my-zsh 安装（手动安装）
+# 修改 Dockerfile，在 zsh 安装命令后添加 || true
+```
+
+## 四、运行容器（推荐方式）
+
+### 4.1 首次启动容器
 
 ```bash
 docker run -dit \
   --name doris-dev \
   --restart=always \
   --network host \
-  -v ~/doris-docker/doris-src:/home/ocsuser/doris-src \
+  -v ~/doris-docker/doris-src/doris:/home/ocsuser/doris-src \
   -v ~/doris-docker/.m2:/home/ocsuser/.m2 \
   -v ~/doris-docker/fe-data:/home/ocsuser/fe-data \
   -v ~/doris-docker/be-data:/home/ocsuser/be-data \
@@ -47,6 +155,10 @@ docker run -dit \
   /bin/zsh
 ```
 
+**重要说明：**
+- 注意源码挂载路径是 `~/doris-docker/doris-src/doris`（包含 doris 子目录）
+- 这样容器内的 `/home/ocsuser/doris-src` 就是 Doris 源码根目录
+
 **参数说明：**
 - `-dit`: 后台运行并分配终端
 - `--name doris-dev`: 容器名称
@@ -54,15 +166,15 @@ docker run -dit \
 - `--network host`: 使用宿主机网络（无需端口映射）
 - `-v`: 挂载目录到容器
 
-### 3.2 进入容器
+### 4.2 进入容器
 
 ```bash
 docker exec -it doris-dev zsh
 ```
 
-## 四、编译 Doris
+## 五、编译 Doris
 
-### 4.1 首次编译（在容器内执行）
+### 5.1 首次编译（在容器内执行）
 
 ```bash
 cd ~/doris-src
@@ -75,7 +187,7 @@ sh build.sh --clean
 # sh build.sh --be --clean    # 只编译 BE
 ```
 
-### 4.2 编译产物位置
+### 5.2 编译产物位置
 
 ```bash
 # FE 编译产物
@@ -85,9 +197,9 @@ sh build.sh --clean
 ~/doris-src/output/be/
 ```
 
-## 五、配置自动启动脚本
+## 六、配置自动启动脚本
 
-### 5.1 创建启动脚本
+### 6.1 创建启动脚本
 
 在容器内创建启动脚本：
 
@@ -137,7 +249,7 @@ EOF
 chmod +x ~/start-fe.sh ~/start-be.sh ~/start-doris.sh
 ```
 
-### 5.2 配置自动启动（添加到 .zshrc）
+### 6.2 配置自动启动（添加到 .zshrc）
 
 ```bash
 # 在容器内执行
@@ -153,9 +265,9 @@ EOF
 source ~/.zshrc
 ```
 
-## 六、配置 Doris
+## 七、配置 Doris
 
-### 6.1 初次配置 FE
+### 7.1 初次配置 FE
 
 ```bash
 # 编辑 FE 配置文件
@@ -167,7 +279,7 @@ vim ~/doris-src/output/fe/conf/fe.conf
 # priority_networks = 127.0.0.1/32  # 或你的实际网段
 ```
 
-### 6.2 初次配置 BE
+### 7.2 初次配置 BE
 
 ```bash
 # 编辑 BE 配置文件
@@ -179,9 +291,9 @@ vim ~/doris-src/output/be/conf/be.conf
 # priority_networks = 127.0.0.1/32  # 或你的实际网段
 ```
 
-## 七、启动和管理
+## 八、启动和管理
 
-### 7.1 手动启动服务
+### 8.1 手动启动服务
 
 ```bash
 # 方式1：使用启动脚本
@@ -192,7 +304,7 @@ vim ~/doris-src/output/be/conf/be.conf
 ~/start-be.sh
 ```
 
-### 7.2 停止服务
+### 8.2 停止服务
 
 ```bash
 # 停止 FE
@@ -202,7 +314,7 @@ vim ~/doris-src/output/be/conf/be.conf
 ~/doris-src/output/be/bin/stop_be.sh
 ```
 
-### 7.3 查看服务状态
+### 8.3 查看服务状态
 
 ```bash
 # 查看进程
@@ -213,7 +325,7 @@ tail -f ~/logs/fe/fe.log
 tail -f ~/logs/be/be.INFO
 ```
 
-### 7.4 连接 Doris
+### 8.4 连接 Doris
 
 ```bash
 # 使用 MySQL 客户端连接（默认端口 9030）
@@ -226,7 +338,7 @@ ALTER SYSTEM ADD BACKEND "127.0.0.1:9050";
 SHOW BACKENDS\G
 ```
 
-## 八、常用命令
+## 九、常用命令
 
 ```bash
 # 进入容器
@@ -248,7 +360,7 @@ docker start doris-dev
 docker rm -f doris-dev
 ```
 
-## 九、重新编译
+## 十、重新编译
 
 ```bash
 # 进入容器
@@ -266,9 +378,9 @@ sh build.sh --clean
 ~/start-doris.sh
 ```
 
-## 十、故障排查
+## 十一、故障排查
 
-### 10.1 FE 启动失败
+### 11.1 FE 启动失败
 
 ```bash
 # 查看 FE 日志
@@ -280,7 +392,7 @@ lsof -i:9030
 lsof -i:8030
 ```
 
-### 10.2 BE 启动失败
+### 11.2 BE 启动失败
 
 ```bash
 # 查看 BE 日志
@@ -292,7 +404,7 @@ lsof -i:9050
 lsof -i:8040
 ```
 
-### 10.3 容器重启后服务未自动启动
+### 11.3 容器重启后服务未自动启动
 
 ```bash
 # 检查 .zshrc 配置
@@ -302,7 +414,7 @@ cat ~/.zshrc | grep start-doris
 ~/start-doris.sh
 ```
 
-## 十一、端口说明
+## 十二、端口说明
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
@@ -316,7 +428,7 @@ cat ~/.zshrc | grep start-doris
 
 由于使用 `--network host`，这些端口直接绑定在宿主机上。
 
-## 十二、备份与恢复
+## 十三、备份与恢复
 
 ```bash
 # 备份（在宿主机执行）
