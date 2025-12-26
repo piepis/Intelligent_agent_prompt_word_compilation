@@ -36,11 +36,13 @@
    - hdfs 命令
 3. 为 5 名开发人员创建独立账户（`dev01` ~ `dev05`）
    - 每人 100GB 磁盘配额
-   - 共享 `shmetro_admin` 的 Java/Python 环境
+   - 共享 `shmetro_admin` 的 Java/Python 环境,但是没有三大集群的操作权限，所有对集群的操作权限，都需要使用 sudoshmetro_admin 进行操作
 4. **说明**：
    - 环境共享机制（软链接/环境变量）
    - 如何避免环境冲突（虚拟环境/本地仓库）
    - 权限隔离策略（755 权限/禁止 sudo）
+   - kubectl 命令（支持多集群） 只有 shmetro_admin 有权限
+   - hdfs 命令。只有 shmetro_admin 有权限
 
 ### 需求二：Kubernetes 集群统一管理
 1. 通过 kubectl 同时管理 MRS 和 DWS 两个 K8s 集群
@@ -70,7 +72,7 @@
 1. 两台堡垒机使用共享存储
 2. 任一堡垒机上传的文件，另一台立即可见
 3. **说明**：
-   - 存储方案选型对比（NFS/云 NAS/GlusterFS/CephFS）
+   - 存储方案 obs
    - 推荐方案及理由
    - 挂载方式与权限设计
    - 目录规划（/mnt/shared/home、data、logs、backups）
